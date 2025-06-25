@@ -17,7 +17,6 @@
         .container {
             max-width: 1200px;
         }
-        /* Simple animation for the card appearance */
         @keyframes fadeIn {
             from { opacity: 0; transform: translateY(20px); }
             to { opacity: 1; transform: translateY(0); }
@@ -36,7 +35,6 @@
         </header>
 
         <main id="stats-container">
-            <!-- Loading Spinner -->
             <div id="loading" class="text-center">
                 <div class="flex justify-center items-center h-64">
                     <svg class="animate-spin h-10 w-10 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
@@ -47,19 +45,14 @@
                 </div>
                 <p id="loading-status" class="text-gray-400 mt-4">Contacting your API...</p>
             </div>
-            <!-- Stats cards will be injected here by JavaScript -->
         </main>
 
         <footer class="text-center mt-12 text-gray-500">
-            <p>Data provided by your live serverless backend. Matchups based on probable pitchers and active rosters.</p>
+            <p>Data provided by a live serverless backend. Matchups based on probable pitchers and active rosters.</p>
         </footer>
     </div>
 
     <script>
-        /**
-         * Renders the final statistics cards to the DOM.
-         * @param {Array} statsData - The final array of processed player stat objects.
-         */
         function renderStats(statsData) {
             const container = document.getElementById('stats-container');
             const loadingIndicator = document.getElementById('loading');
@@ -71,7 +64,6 @@
             }
 
             const sortedData = statsData.sort((a, b) => b.careerHRs - a.careerHRs);
-
             const grid = document.createElement('div');
             grid.className = 'grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6';
 
@@ -110,11 +102,7 @@
             container.appendChild(grid);
         }
 
-        /**
-         * Fetches stats from the serverless backend function.
-         */
         async function fetchAndDisplayStats() {
-            // This relative path will automatically point to your Vercel serverless function.
             const apiUrl = '/api/get-stats';
             const statusElement = document.getElementById('loading-status');
             const container = document.getElementById('stats-container');
@@ -124,7 +112,7 @@
                 const response = await fetch(apiUrl);
 
                 if (!response.ok) {
-                    throw new Error(`API responded with status: ${response.status}`);
+                    throw new Error(`API responded with status: ${response.status} ${response.statusText}`);
                 }
 
                 const data = await response.json();
@@ -133,12 +121,12 @@
 
             } catch (error) {
                 console.error("Error fetching from serverless function:", error);
-                statusElement.style.display = 'none';
-                container.innerHTML = `<p class="text-center text-red-400 text-lg">Error: Could not load live data from the backend. Please check the Vercel logs.</p>`;
+                const loadingDiv = document.getElementById('loading');
+                if (loadingDiv) loadingDiv.style.display = 'none';
+                container.innerHTML = `<p class="text-center text-red-400 text-lg">Error: Could not load live data from the backend. Please check the function logs in your Vercel dashboard.</p>`;
             }
         }
 
-        // --- ENTRY POINT ---
         document.addEventListener('DOMContentLoaded', () => {
             document.getElementById('current-date').textContent = `Stats for ${new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })}`;
             fetchAndDisplayStats();
