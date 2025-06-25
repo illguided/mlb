@@ -1,21 +1,24 @@
-// File: /api/get-stats.js
+// This file must be placed in the /api/ directory of your project.
 
-// This is a serverless function.
-// It will fetch MLB data and return it as JSON.
+const API_BASE_URL = 'https://statsapi.mlb.com/api/v1';
 
-export default async function handler(req, res) {
-  const API_BASE_URL = 'https://statsapi.mlb.com/api/v1';
-
+/**
+ * Main handler for the serverless function.
+ * Vercel automatically maps this file to the /api/get-stats endpoint.
+ */
+export default async function handler(request, response) {
   try {
-    // 1. Get today's schedule
     const today = new Date().toISOString().split('T')[0];
     const scheduleUrl = `${API_BASE_URL}/schedule/games/?sportId=1&date=${today}`;
-    const scheduleResponse = await fetch(scheduleUrl);
-    const scheduleData = await scheduleResponse.json();
+    
+    const scheduleRes = await fetch(scheduleUrl);
+    if (!scheduleRes.ok) {
+        throw new Error(`Failed to fetch schedule: ${scheduleRes.statusText}`);
+    }
+    const scheduleData = await scheduleRes.json();
 
     if (!scheduleData.dates || scheduleData.dates.length === 0) {
-      res.status(200).json([]); // No games today, return empty array
-      return;
+      return response.status(200).json([]);
     }
 
     const games = scheduleData.dates[0].games;
@@ -37,56 +40,74 @@ export default async function handler(req, res) {
 
     const results = await Promise.all(matchupPromises);
     const finalStats = results.flat().filter(player => player !== null);
-
-    // --- IMPORTANT ---
-    // This allows your frontend to fetch data from this function from any domain.
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate'); // Cache for 1 hour
-
-    // 2. Send the final data as the response
-    res.status(200).json(finalStats);
+    
+    // Set headers for caching and CORS (important for Vercel)
+    response.setHeader('Access-Control-Allow-Origin', '*');
+    response.setHeader('Cache-Control', 's-maxage=3600, stale-while-revalidate');
+    response.status(200).json(finalStats);
 
   } catch (error) {
     console.error("Error in serverless function:", error);
-    res.status(500).json({ error: 'Failed to fetch MLB data' });
+    response.status(500).json({ error: 'Failed to fetch MLB data', details: error.message });
   }
 }
 
-// This helper function remains the same
+/**
+ * Helper function to process all batters from one team against a pitcher.
+ */
 async function processMatchup(team, pitcher) {
-    // (The same processMatchup function from the previous HTML file would go here)
-    // ... logic to get roster, BvP stats, and recent game logs ...
-    // This is simplified for brevity.
     try {
         const rosterUrl = `${API_BASE_URL}/teams/${team.id}/roster`;
         const rosterResponse = await fetch(rosterUrl);
+        if (!rosterResponse.ok) return []; // Silently fail for this team if roster is unavailable
         const rosterData = await rosterResponse.json();
         const batters = rosterData.roster.filter(p => p.position.code !== '1');
 
         const playerStatPromises = batters.map(async (batter) => {
-            const bvpUrl = `${API_BASE_URL}/people/${batter.person.id}/stats?stats=vsPlayer&group=hitting&opposingPlayerId=${pitcher.id}`;
-            const bvpResponse = await fetch(bvpUrl);
-            const bvpData = await bvpResponse.json();
+            try {
+                const bvpUrl = `${API_BASE_URL}/people/${batter.person.id}/stats?stats=vsPlayer&group=hitting&opposingPlayerId=${pitcher.id}`;
+                const bvpResponse = await fetch(bvpUrl);
+                if (!bvpResponse.ok) return null;
+                const bvpData = await bvpResponse.json();
 
-            const careerStats = bvpData.stats[0]?.splits[0]?.stat;
-            if (careerStats && careerStats.homeRuns > 0) {
-                // Simplified recent stats for this example
-                return {
-                    playerName: batter.person.fullName,
-                    playerId: batter.person.id,
-                    team: team.name,
-                    vsPitcher: pitcher.fullName,
-                    careerHRs: careerStats.homeRuns,
-                    last5: Math.floor(Math.random() * 3), // Placeholder
-                    last10: Math.floor(Math.random() * 5), // Placeholder
-                    last20: Math.floor(Math.random() * 8)  // Placeholder
-                };
+                const careerStats = bvpData.stats[0]?.splits[0]?.stat;
+                if (careerStats && careerStats.homeRuns > 0) {
+                    const gameLogUrl = `${API_BASE_URL}/people/${batter.person.id}/stats?stats=gameLog&limit=20&group=hitting`;
+                    const gameLogResponse = await fetch(gameLogUrl);
+                    if (!gameLogResponse.ok) return null;
+                    const gameLogData = await gameLogResponse.json();
+                    
+                    let last5 = 0, last10 = 0, last20 = 0;
+                    if(gameLogData.stats[0]?.splits) {
+                        gameLogData.stats[0].splits.forEach((game, index) => {
+                            const hrCount = game.stat.homeRuns || 0;
+                            if (index < 5) last5 += hrCount;
+                            if (index < 10) last10 += hrCount;
+                            last20 += hrCount;
+                        });
+                    }
+                    
+                    return {
+                        playerName: batter.person.fullName,
+                        playerId: batter.person.id,
+                        team: team.name,
+                        vsPitcher: pitcher.fullName,
+                        careerHRs: careerStats.homeRuns,
+                        last5,
+                        last10,
+                        last20
+                    };
+                }
+                return null;
+            } catch (e) {
+                console.error(`Error processing batter ${batter.person.id}`, e);
+                return null; // Don't let one batter fail the whole process
             }
-            return null;
         });
         
         return Promise.all(playerStatPromises);
     } catch (err) {
+        console.error(`Failed to process matchup for team ${team.id}`, err);
         return [];
     }
 }
